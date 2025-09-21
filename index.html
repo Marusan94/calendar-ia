@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Calendario IA Minimalista</title>
+  <!-- Fuente moderna -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background-color: #1b1b1b;
+      color: #f1f1f1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      transition: all 0.3s ease;
+    }
+    header {
+      display: flex;
+      justify-content: space-around;
+      width: 100%;
+      padding: 1rem;
+      background: #242424;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      border-bottom: 1px solid #444;
+    }
+    button {
+      background: #2e7d32;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 12px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: all 0.2s ease;
+    }
+    button:hover { background: #256629; }
+    #year-view { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; padding: 1rem; width: 100%; max-width: 1400px; }
+    .month { border: 2px dashed #444; padding: 1rem; border-radius: 12px; background: #2a2a2a; cursor: pointer; transition: transform 0.3s, border-color 0.3s; }
+    .month:hover { transform: scale(1.05); border-color: #2e7d32; }
+    .month-tasks { margin-top: 0.5rem; font-size: 0.9rem; text-align: left; }
+    .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1rem; margin-top: 1rem; }
+    .day { border: 2px solid #444; border-radius: 16px; background: #2a2a2a; height: 120px; font-size: 1rem; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 6px; cursor: pointer; transition: all 0.2s ease; position: relative; }
+    .day-number { font-size: 1.2rem; font-weight: bold; margin-bottom: 4px; }
+    .day:hover { background: #333; transform: scale(1.03); }
+    .task { background: #2e7d32; color: #fff; padding: 2px 6px; border-radius: 6px; cursor: grab; font-size: 0.9rem; margin-top: 4px; box-shadow: 2px 2px 5px rgba(0,0,0,0.3); }
+    .day-detail { display: none; flex-direction: column; padding: 1rem; width: 100%; max-width: 900px; margin: auto; }
+    .hour { border: 1px dashed #444; min-height: 40px; display: flex; align-items: center; padding-left: 8px; font-size: 0.9rem; }
+    .hour.drag-over { background: #2f2f2f; border-color: #2e7d32; }
+    .period-title { margin: 1rem 0 0.5rem 0; font-size: 1.2rem; color: #7ed957; }
+    .comments { margin-top: 1rem; }
+    .comment { background: #2e2e2e; padding: 0.8rem 1rem; margin: 0.5rem 0; border-radius: 16px; max-width: 70%; font-size: 1rem; position: relative; word-wrap: break-word; }
+    .comment::after { content: ""; position: absolute; left: 10px; bottom: -10px; width: 0; height: 0; border-left: 10px solid transparent; border-right: 10px solid transparent; border-top: 10px solid #2e2e2e; }
+    .comment-box { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.8rem; }
+    .comment-box textarea { width: 100%; height: 80px; padding: 0.6rem; border-radius: 8px; border: none; font-size: 1rem; background: #1f1f1f; color: #f1f1f1; resize: vertical; }
+    #ia-container { margin: 1rem; display: flex; flex-direction: column; gap: 0.5rem; width: 300px; }
+    #ia-input { width: 100%; height: 120px; padding: 0.8rem; border-radius: 12px; border: none; background: #2a2a2a; color: #f1f1f1; font-size: 1rem; resize: vertical; }
+    .task-dot { width: 8px; height: 8px; background: #7ed957; border-radius: 50%; position: absolute; bottom: 6px; right: 6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <button onclick="showYear()">📅 Ver año</button>
+    <button onclick="goToday()">📍 Hoy</button>
+    <button onclick="toggleFullscreen()">⛶ Pantalla Completa</button>
+  </header>
+
+  <section id="year-view"></section>
+  <section id="calendar"></section>
+  <section id="day-view" class="day-detail"></section>
+
+  <div id="ia-container">
+    <textarea id="ia-input" placeholder="Agrega tarea: qué, cuándo y a qué hora (ej. Reunión lunes 10 AM)"></textarea>
+    <button onclick="sendToAI()">➕ Agregar con IA</button>
+  </div>
+
+  <script>
+    const calendar = document.getElementById("calendar");
+    const yearView = document.getElementById("year-view");
+    const dayView = document.getElementById("day-view");
+    let currentMonth = null;
+
+    // Persistencia en localStorage
+    let agenda = JSON.parse(localStorage.getItem("agenda")) || [];
+    function saveAgenda() {
+      localStorage.setItem("agenda", JSON.stringify(agenda));
+    }
+
+    const meses = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
+                   "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+    function showYear() {
+      yearView.innerHTML = "";
+      calendar.style.display = "none";
+      dayView.style.display = "none";
+      yearView.style.display = "grid";
+      meses.forEach((m, idx) => {
+        const monthBox = document.createElement("div");
+        monthBox.classList.add("month");
+        monthBox.textContent = m;
+        monthBox.onclick = () => showDays(idx + 1, m.toLowerCase());
+        const tasksDiv = document.createElement("div");
+        tasksDiv.classList.add("month-tasks");
+        agenda.filter(t => t.month === idx + 1).forEach(t => {
+          const smallTask = document.createElement("div");
+          smallTask.textContent = `📌 ${t.day}: ${t.task}`;
+          tasksDiv.appendChild(smallTask);
+        });
+        monthBox.appendChild(tasksDiv);
+        yearView.appendChild(monthBox);
+      });
+    }
+
+    function showDays(monthNumber, monthName) {
+      currentMonth = monthNumber;
+      yearView.style.display = "none";
+      calendar.style.display = "block";
+      calendar.innerHTML = "";
+      dayView.style.display = "none";
+      const daysContainer = document.createElement("div");
+      daysContainer.classList.add("days");
+      let totalDays = [1,3,5,7,8,10,12].includes(monthNumber) ? 31 : (monthNumber===2?28:30);
+      for (let i = 1; i <= totalDays; i++) {
+        const day = document.createElement("div");
+        day.classList.add("day");
+        const num = document.createElement("div");
+        num.classList.add("day-number");
+        num.textContent = i;
+        day.appendChild(num);
+        const dayTasks = agenda.filter(t => t.day === i && t.month === monthNumber);
+        if (dayTasks.length > 0) {
+          const dot = document.createElement("div");
+          dot.className = "task-dot";
+          day.appendChild(dot);
+        }
+        dayTasks.forEach(t => {
+          const task = document.createElement("div");
+          task.classList.add("task");
+          task.textContent = t.task;
+          task.draggable = true;
+          task.onclick = () => showTaskDetail(t);
+          task.ondragstart = e => e.dataTransfer.setData("taskId", t.id);
+          day.appendChild(task);
+        });
+        day.onclick = () => showDayDetail(i, monthName);
+        daysContainer.appendChild(day);
+      }
+      calendar.appendChild(daysContainer);
+    }
+
+    function showDayDetail(dayNumber, monthName) {
+      calendar.style.display = "none";
+      dayView.innerHTML = "";
+      const back = document.createElement("button");
+      back.textContent = "⬅ Volver al mes";
+      back.onclick = () => { dayView.style.display = "none"; calendar.style.display = "block"; showDays(currentMonth, monthName); };
+      dayView.appendChild(back);
+      const title = document.createElement("h2");
+      title.textContent = `${dayNumber} de ${monthName}`;
+      dayView.appendChild(title);
+
+      const amTitle = document.createElement("div");
+      amTitle.classList.add("period-title");
+      amTitle.textContent = "🌅 AM";
+      dayView.appendChild(amTitle);
+
+      for (let h = 0; h < 12; h++) renderHourBlock(h, dayNumber, monthName);
+
+      const pmTitle = document.createElement("div");
+      pmTitle.classList.add("period-title");
+      pmTitle.textContent = "🌙 PM";
+      dayView.appendChild(pmTitle);
+
+      for (let h = 12; h < 24; h++) renderHourBlock(h, dayNumber, monthName);
+
+      dayView.style.display = "flex";
+    }
+
+    function renderHourBlock(h, dayNumber, monthName) {
+      const hourDiv = document.createElement("div");
+      hourDiv.classList.add("hour");
+      const label = h === 0 ? "12 AM" : h < 12 ? `${h} AM` : h === 12 ? "12 PM" : `${h-12} PM`;
+      hourDiv.textContent = label;
+      hourDiv.ondragover = e => { e.preventDefault(); hourDiv.classList.add("drag-over"); };
+      hourDiv.ondragleave = () => hourDiv.classList.remove("drag-over");
+      hourDiv.ondrop = e => {
+        e.preventDefault();
+        hourDiv.classList.remove("drag-over");
+        const taskId = e.dataTransfer.getData("taskId");
+        const task = agenda.find(t => t.id == taskId);
+        if (task) { task.hour = h; task.day = dayNumber; task.month = currentMonth; saveAgenda(); showDayDetail(dayNumber, monthName); }
+      };
+      agenda.filter(t => t.day === dayNumber && t.month === currentMonth && t.hour === h).forEach(t => {
+        const task = document.createElement("div");
+        task.classList.add("task");
+        task.textContent = t.task;
+        task.draggable = true;
+        task.onclick = () => showTaskDetail(t);
+        task.ondragstart = e => e.dataTransfer.setData("taskId", t.id);
+        hourDiv.appendChild(task);
+      });
+      dayView.appendChild(hourDiv);
+    }
+
+    function showTaskDetail(task) {
+      dayView.innerHTML = "";
+      const back = document.createElement("button");
+      back.textContent = "⬅ Volver al día";
+      back.onclick = () => showDayDetail(task.day, meses[task.month-1]);
+      dayView.appendChild(back);
+      const title = document.createElement("h2");
+      title.textContent = `📌 ${task.day} de ${meses[task.month-1]} - ${task.task}`;
+      dayView.appendChild(title);
+
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "🗑️ Eliminar tarea";
+      delBtn.onclick = () => { agenda = agenda.filter(t => t !== task); saveAgenda(); showDayDetail(task.day, meses[task.month-1]); };
+      dayView.appendChild(delBtn);
+
+      const commentsDiv = document.createElement("div");
+      commentsDiv.classList.add("comments");
+      if (!task.comments) task.comments = [];
+      task.comments.forEach(c => {
+        const bubble = document.createElement("div");
+        bubble.classList.add("comment");
+        bubble.textContent = c;
+        commentsDiv.appendChild(bubble);
+      });
+      dayView.appendChild(commentsDiv);
+
+      const box = document.createElement("div");
+      box.classList.add("comment-box");
+      box.innerHTML = `
+        <textarea id="comment-input" placeholder="Escribe un comentario..."></textarea>
+        <button onclick="addComment(${task.id})">💬 Agregar comentario</button>`;
+      dayView.appendChild(box);
+      dayView.style.display = "flex";
+    }
+
+    function addComment(taskId) {
+      const input = document.getElementById("comment-input");
+      const t = agenda.find(t => t.id === taskId);
+      if (t && input.value.trim()) {
+        if (!t.comments) t.comments = [];
+        t.comments.push(input.value.trim());
+        saveAgenda();
+        showTaskDetail(t);
+      }
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else if (document.exitFullscreen) document.exitFullscreen();
+    }
+
+    function goToday() {
+      const today = new Date();
+      const month = today.getMonth() + 1;
+      showDays(month, meses[month - 1]);
+    }
+
+    async function sendToAI() {
+      const input = document.getElementById("ia-input").value;
+      if (!input) return alert("Escribe algo antes de enviar a la IA");
+      try {
+        const res = await fetch("http://127.0.0.1:8000/ia", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: input })
+        });
+        if (!res.ok) throw new Error(`Error HTTP: ${res.status}`);
+        const data = await res.json();
+        if (data.tasks && Array.isArray(data.tasks)) {
+          data.tasks.forEach(t => {
+            t.id = Date.now() + Math.random();
+            t.comments = [];
+            agenda.push(t);
+          });
+          saveAgenda();
+          if (currentMonth) showDays(currentMonth, meses[currentMonth-1]);
+          else showYear();
+        }
+      } catch (err) {
+        console.error("Error al conectar con la IA:", err);
+      }
+    }
+
+    showYear();
+  </script>
+</body>
+</html>
